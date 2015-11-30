@@ -1,0 +1,14 @@
+{
+  "name": "mockserver",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "bluebird": "^3.0.5",
+    "globby": "^4.0.0",
+    "read-file": "^0.2.0",
+    "restify": "^4.0.3"
+  }
+}
