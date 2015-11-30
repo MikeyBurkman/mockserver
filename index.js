@@ -77,7 +77,7 @@ Promise.resolve(config.data)
 });
 
 function findMatchingFile(body, potentials) {
-  // Use reduce to read in series but read more files than we have to
+  // Use reduce to read in series but not read more files than we have to
   return Promise.reduce(potentials, function(result, file) {
     if (result) {
       // Already found a match, no need to read anything more
