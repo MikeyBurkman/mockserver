@@ -1,8 +1,9 @@
-
 var restify = require('restify');
 var globby = require('globby');
 var Promise = require('bluebird');
 var readFile = Promise.promisify(require('read-file'));
+var parseXml = Promise.promisify(require('xml2js').parseString);
+var deepEqual = require('deep-equal');
 var fs = require('fs');
 
 var path = require('path');
@@ -11,6 +12,10 @@ var config = require('./config.js');
 
 var server = restify.createServer();
 server.use(parseBodyString);
+
+var parseMaps = {
+  xml: findMatchingXml
+};
 
 Promise.resolve(config.data)
 .map(function(data) {
@@ -23,13 +28,13 @@ Promise.resolve(config.data)
   return Promise.resolve(globby(filePattern))
     .map(function(requestFile) {
       
-      var absReq = path.resolve('.', requestFile);
+      var absReq = path.isAbsolute(requestFile) ? requestFile : path.resolve('.', requestFile);
       var dir = path.dirname(absReq);
       var filename = path.basename(absReq);
       
       return {
         req: absReq,
-        resp: path.join(dir, filename.replace('req', 'res'))
+        resp: path.join(dir, filename.replace('req', 'rsp'))
       };
     })
     .tap(function(files) {
@@ -40,6 +45,7 @@ Promise.resolve(config.data)
     })
     .then(function(files) {
       server[method](uri, function(req, res) {
+        var startTime = new Date();
         var search;
         if (method === 'get') {
           search = req.url;
@@ -47,11 +53,23 @@ Promise.resolve(config.data)
           search = req.bodyString;
         }
         
-        return findMatchingFile(search, files)
+        var parser = parseMaps[data.parser];
+        
+        if (!parser) {
+          console.log('Unknown parser in config: ', data.parser);
+          res.set(500, 'Unknown parser in config: ', data.parser);
+          return;
+        }
+        
+        return parser(search, files)
           .then(function(file) {
             if (!file) {
+              console.error('No match for: ');
+              console.error(search);
               res.send(404);
+              return;
             } else {
+              console.log('Found match:', file.resp);
               res.writeHead(200, {
                 'content-type': data.defaultMimeType
               });
@@ -61,7 +79,10 @@ Promise.resolve(config.data)
           .catch(function(err) {
             console.error(err);
             res.send(500, err);
-          });
+          })
+          .finally(function() {
+            console.log('Total time: ', new Date() - startTime);
+          })
       });
     });
   
@@ -76,19 +97,27 @@ Promise.resolve(config.data)
   console.error(err);
 });
 
-function findMatchingFile(body, potentials) {
-  // Use reduce to read in series but read more files than we have to
-  return Promise.reduce(potentials, function(result, file) {
-    if (result) {
-      // Already found a match, no need to read anything more
-      return result;
-    } else {
-      return readFile(file.req, {encoding: 'utf8'})
-        .then(function(contents) {
-          return (contents === body) ? file : false;
-        });
-    }
-  }, false);
+function findMatchingXml(body, potentials) {
+  return parseXml(body)
+    .then(function(xml) {
+      // Use reduce to read in series but not read more files than we have to
+      return Promise.reduce(potentials, function(result, file) {
+        if (result) {
+          // Already found a match, no need to read anything more
+          return result;
+        } else {
+          return readFile(file.req, {encoding: 'utf8'})
+            .then(parseXml)
+            .then(function(contents) {
+              return deepEqual(contents, xml) ? file : false;
+            })
+            .catch(function(err) {
+              // Error parsing xml... probably not an issue (?)
+              return false;
+            });
+        }
+      }, false);
+    });
 }
 
 function streamFileToResponse(filename, resp) {
